@@ -145,10 +145,13 @@ main { max-width: 1320px; margin: 0 auto; padding: 0 22px 60px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .field > span {
   font-size: 12.5px; font-weight: 550; color: var(--text-2);
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center;
 }
-.field > label b, .field > span b { color: var(--danger); }
-.field .val { font-family: var(--mono); color: var(--accent); font-size: 12px; }
+/* 必填星号紧贴标签文字（不能用 space-between，否则会被推到字段右边缘） */
+.field > label b, .field > span b { color: var(--danger); margin-left: 3px; }
+.field .val {
+  margin-left: auto; font-family: var(--mono); color: var(--accent); font-size: 12px;
+}
 .span2 { grid-column: span 2; }
 
 input[type="text"], input[type="number"], input[type="password"],
