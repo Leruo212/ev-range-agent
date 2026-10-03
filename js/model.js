@@ -238,9 +238,13 @@ export function planCharging(opts) {
 
   const stops = [];
   const notes = [];
+  const swapCapable = !!spec.swap;
 
   if (needKwh + minKwh <= usableKwh + 1e-6) {
     // 一口气到
+    if (swapCapable) {
+      notes.push('这台车支持换电：短途用不上，但长途时「3 分钟换一块满电电池」比快充省得多，规划时优先找换电站而不是充电桩。');
+    }
     return {
       needed: false,
       stops,
@@ -248,6 +252,7 @@ export function planCharging(opts) {
       usableKwh,
       needKwh,
       notes,
+      swapCapable,
       strategy: '无需中途补能',
     };
   }
@@ -315,6 +320,13 @@ export function planCharging(opts) {
   if (spec.dc < 120) {
     notes.push(`该车型快充峰值仅 ${spec.dc}kW，单次补能时间较长，建议把充电与用餐/休息合并安排。`);
   }
+  if (swapCapable) {
+    notes.push(
+      `这台车支持换电，每次换电约 3 分钟（全程自动、人不用下车），比上面按快充算的 ${stops.reduce((s, x) => s + x.chargeMin, 0)} 分钟总补能时间省得多。` +
+      `蔚来换电站全国已超 3400 座、高速平均约 180km 一座，长途请优先用「加电」App 找换电站而不是充电桩；` +
+      `但换电站的电池库存与排队情况要现场看，节假日高峰期有等位风险，别把行程卡得太紧。`
+    );
+  }
 
   return {
     needed: true,
@@ -323,7 +335,10 @@ export function planCharging(opts) {
     usableKwh,
     needKwh,
     notes,
-    strategy: `中途补能 ${stops.length} 次，每次充至 80%（快充效率拐点）`,
+    swapCapable,
+    strategy: swapCapable
+      ? `中途补能 ${stops.length} 次（支持换电，可压缩到每次约 3 分钟）`
+      : `中途补能 ${stops.length} 次，每次充至 80%（快充效率拐点）`,
   };
 }
 

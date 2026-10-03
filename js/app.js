@@ -113,7 +113,13 @@ function buildShareURL() {
 
 function buildCarList() {
   const dl = $('car-list');
-  dl.innerHTML = EV_DB.map((c) => `<option value="${esc(c.brand)} ${esc(c.model)}">${c.range}km · ${c.battery}kWh</option>`).join('');
+  // 副标题里带上平台与换电，用户才能发现「NT3.0 有哪些车」
+  dl.innerHTML = EV_DB.map((c) => {
+    const meta = [`CLTC ${c.range}km`, `${c.battery}kWh`];
+    if (c.platform) meta.push(c.platform);
+    if (c.swap) meta.push('可换电');
+    return `<option value="${esc(c.brand)} ${esc(c.model)}">${esc(meta.join(' · '))}</option>`;
+  }).join('');
 }
 
 function setDefaultDepart() {
@@ -147,7 +153,10 @@ function renderCarPicked() {
     return;
   }
   box.hidden = false;
+  currentSpec.swap = !!currentSpec.swap;
   box.innerHTML = `<b>${esc(currentSpec.name)}</b>
+    ${currentSpec.platform ? `<span class="tag">${esc(currentSpec.platform)}</span>` : ''}
+    ${currentSpec.swap ? '<span class="tag tag-swap">支持换电</span>' : ''}
     <span>电池 ${currentSpec.battery} kWh</span>
     <span>CLTC ${currentSpec.range} km</span>
     <span>${currentSpec.mass} kg</span>
@@ -165,6 +174,7 @@ function readCustomCar() {
     battery, range,
     mass: parseFloat($('c-mass').value),
     dc: parseFloat($('c-dc').value),
+    swap: $('c-swap').checked,
   });
 }
 
@@ -236,6 +246,10 @@ function bindForm() {
       if (c) { currentSpec = c; renderCarPicked(); }
     });
   }
+  $('c-swap').addEventListener('change', () => {
+    const c = readCustomCar();
+    if (c) { currentSpec = c; renderCarPicked(); }
+  });
 
   $('soc').addEventListener('input', () => { $('soc-val').textContent = $('soc').value + '%'; });
 

@@ -294,8 +294,10 @@ function timelineBlock(a, departISO) {
         <div class="tl-dot"></div>
         <div class="tl-head"><span class="tl-title">补能 · ${s.station ? esc(s.station.name) : '沿线充电站'}</span>
           <span class="tl-time">约 ${at(e.h)} · 第 ${s.atKm}km</span>
-          <span class="tl-pill">停留 ${s.chargeMin} 分钟</span></div>
-        <div class="tl-desc">SOC ${s.atSoc}% → ${s.targetSoc}%，补入 ${s.addKwh} kWh（平均功率约 ${s.avgKw} kW）${s.station && s.station.detourKm > 0.3 ? `，需绕行 ${s.station.detourKm}km` : ''}</div>
+          <span class="tl-pill">停留 ${s.chargeMin} 分钟</span>
+          ${a.charging.swapCapable ? '<span class="tl-pill swap-pill">换电约 3 分钟</span>' : ''}</div>
+        <div class="tl-desc">SOC ${s.atSoc}% → ${s.targetSoc}%，补入 ${s.addKwh} kWh（平均功率约 ${s.avgKw} kW）${s.station && s.station.detourKm > 0.3 ? `，需绕行 ${s.station.detourKm}km` : ''}
+          ${a.charging.swapCapable ? '<br><span class="swap-hint">这台车支持换电：若这一站附近有换电站，整次停留可压缩到约 3 分钟（全程自动、人不用下车）。</span>' : ''}</div>
       </div>`);
     } else {
       const r = e.data;
@@ -502,6 +504,9 @@ export function renderResults(res, container, ctx = {}) {
 
     <div class="block">
       <h3>补能与休息时间线 <span class="tail">出发时刻 ${new Date(departISO).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></h3>
+      <p class="block-note">${esc(a.charging.strategy)}${
+        a.spec.platform ? `　·　整车平台 ${esc(a.spec.platform)}` : ''
+      }${a.charging.swapCapable ? '　·　支持换电' : ''}</p>
       ${timelineBlock(a, departISO)}
     </div>
 

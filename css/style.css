@@ -197,6 +197,21 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .car-picked b { font-weight: 650; }
 .car-picked span { font-family: var(--mono); font-size: 11.5px; opacity: .85; }
+/* 平台 / 换电标记：不是数字，别用等宽字体 */
+.car-picked span.tag {
+  font-family: inherit; font-size: 11px; font-weight: 600; opacity: 1;
+  background: #fff; border: 1px solid #c9dbff; color: var(--accent-dark);
+  padding: 1.5px 8px; border-radius: 999px;
+}
+.car-picked span.tag-swap {
+  border-color: #b6e7cf; color: var(--ok); background: var(--ok-soft);
+}
+
+.custom-grid label.check {
+  flex-direction: row; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text-2); cursor: pointer; padding-top: 20px;
+}
+.custom-grid label.check input { width: auto; margin: 0; accent-color: var(--accent); }
 
 .car-custom { margin-top: 4px; }
 .car-custom summary, .adv summary {
@@ -315,6 +330,14 @@ input[type="range"]::-webkit-slider-thumb {
   background: var(--accent-soft); color: var(--accent-dark); font-weight: 550;
 }
 .tl-pill.rest { background: var(--ok-soft); color: var(--ok); }
+.tl-pill.swap-pill { background: var(--ok-soft); color: var(--ok); }
+.swap-hint { color: var(--ok); }
+.swap-hint::before { content: '⚡ '; }
+
+/* 小节下面的一句说明（补能策略等） */
+.block-note {
+  margin: -6px 0 12px; font-size: 12.5px; color: var(--text-2);
+}
 
 /* 提示 */
 .warns { display: flex; flex-direction: column; gap: 8px; }

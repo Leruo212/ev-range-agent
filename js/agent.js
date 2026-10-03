@@ -206,7 +206,10 @@ function packAnalysis(res) {
       cltc_range_km: a.spec.range,
       curb_mass_kg: a.spec.mass,
       dc_peak_kw: a.spec.dc,
+      platform: a.spec.platform || null,
+      battery_swap: !!a.spec.swap,
       payload_kg: a.extraMassKg,
+      battery_note: 'battery_kwh 为可用电量，已扣除厂商预留缓冲',
     },
     energy: {
       total_kwh: Number(a.totalKwh.toFixed(2)),
@@ -287,6 +290,7 @@ function normSpec(args) {
       range: args.cltc_range_km,
       mass: args.curb_mass_kg,
       dc: args.dc_peak_kw,
+      swap: args.battery_swap,
     });
   }
   return null;
@@ -307,11 +311,15 @@ export const TOOL_IMPL = {
         cltc_range_km: c.range,
         curb_mass_kg: c.mass,
         dc_peak_kw: c.dc,
+        platform: c.platform || null,
+        battery_swap: !!c.swap,
       })),
       hint: list.length
         ? '用 car_id 调用 analyze_trip 即可。若用户的车不在列表里，用 battery_kwh + cltc_range_km + curb_mass_kg 直接传参。'
         : '车型库里没有匹配项，请向用户确认电池容量与官方续航（或让他在界面上手动填写自定义车型）。',
       total_in_db: EV_DB.length,
+      note: 'battery_kwh 是可用电量（非标称容量）；platform 与 battery_swap 用于判断补能策略——'
+        + '蔚来/乐道支持换电，长途实际停留时间远少于按快充估算值。',
     };
   },
 
@@ -543,10 +551,11 @@ export const TOOL_SCHEMA = [
           car_id: { type: 'string', description: '车型 id（来自 search_car_model）' },
           car_query: { type: 'string', description: '车型关键词，找不到 car_id 时用' },
           car_name: { type: 'string' },
-          battery_kwh: { type: 'number', description: '可用电池容量，自定义车型时必填' },
+          battery_kwh: { type: 'number', description: '可用电池容量（非标称），自定义车型时必填' },
           cltc_range_km: { type: 'number', description: '官方续航，自定义车型时必填' },
           curb_mass_kg: { type: 'number' },
           dc_peak_kw: { type: 'number' },
+          battery_swap: { type: 'boolean', description: '是否支持换电（蔚来/乐道为 true）' },
           distance_km: { type: 'number' },
           duration_h: { type: 'number' },
           avg_speed_kmh: { type: 'number' },
@@ -581,6 +590,7 @@ export const TOOL_SCHEMA = [
           cltc_range_km: { type: 'number' },
           curb_mass_kg: { type: 'number' },
           dc_peak_kw: { type: 'number' },
+          battery_swap: { type: 'boolean', description: '是否支持换电（蔚来/乐道为 true）' },
           passengers: { type: 'integer', description: '乘员人数，默认 2' },
           luggage_kg: { type: 'number', description: '行李总重 kg，默认 20' },
           depart_time: { type: 'string', description: '出发时刻 ISO 8601' },
@@ -644,6 +654,17 @@ export function systemPrompt() {
 - 「路上充电方便吗」→ find_charging_stations。
 - 用户没说车型或没说全地点 → 别猜，直接问他；车型不确定时先 search_car_model 给 3 个候选让他选。
 - 用户说「我的车」「Model Y 之类模糊」→ search_car_model 后确认版本（电池容量不同续航差很多）。
+
+## 车型平台与补能方式（容易被忽略，但影响很大）
+- 车型库带 platform 字段：蔚来/乐道分 **NT2.0 / NT2.5（400V）** 与 **NT3.0（900V，峰值 600kW、5C）**。
+  充得快不快、能不能持续高功率，就是这里决定的。被问到就解释这一层。
+- battery_swap 为 true 的车（蔚来、乐道）**支持换电，一次约 3 分钟**。
+  给补能建议时必须同时给两个口径：「按快充算 X 分钟」和「有换电站的话约 3 分钟」，
+  并提醒换电站的电池库存与排队有不确定性，节假日别把行程卡太紧。
+- **ET7 截至 2026 年 10 月仍是 NT2.0（400V）**，官方已明确无换代计划，别当成 NT3.0 车。
+  用户如果说「NT3.0 的 ET7」，要如实纠正；NT3.0 的轿车目前只有 ET9。
+- 车型库的 battery_kwh 是**可用电量**不是标称容量（蔚来 102kWh 包记 94），
+  用户质疑电量和官方标注不一致时用这个解释。
 
 ## 数据来源要诚实说明
 - 路线与海拔：高德或 OpenStreetMap/OSRM + Copernicus DEM，海拔为 90m 网格地形，与实际路面有 ±10~30m 误差。
