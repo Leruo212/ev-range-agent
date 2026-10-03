@@ -386,6 +386,10 @@ td.hl { font-weight: 650; color: var(--accent); }
 }
 .chip:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
 
+.tool-trace { width: 100%; }
+/* 带工具轨迹的消息：轨迹整宽堆在气泡下方，别跟气泡挤一行 */
+.msg-stacked { flex-direction: column; align-items: stretch; }
+.msg-stacked .msg-body { max-width: 100%; }
 .tool-trace {
   font-size: 11.5px; color: var(--muted); background: #fbfcfe;
   border: 1px dashed var(--border-strong); border-radius: 9px; padding: 7px 10px;

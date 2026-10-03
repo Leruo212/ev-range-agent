@@ -348,6 +348,7 @@ async function sendChat() {
   body.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
 
   const traces = [];
+  div.classList.add('msg-stacked');
   const traceEl = document.createElement('div');
   traceEl.className = 'tool-trace';
   traceEl.style.display = 'none';
