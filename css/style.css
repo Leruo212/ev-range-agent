@@ -152,6 +152,7 @@ main { max-width: 1320px; margin: 0 auto; padding: 0 22px 60px; }
 .field .val {
   margin-left: auto; font-family: var(--mono); color: var(--accent); font-size: 12px;
 }
+.field-hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 .span2 { grid-column: span 2; }
 
 input[type="text"], input[type="number"], input[type="password"],
@@ -335,7 +336,33 @@ tbody tr:last-child td { border-bottom: 0; }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 td.hl { font-weight: 650; color: var(--accent); }
 
-/* 加载骨架 */
+/* 对比表：9 列在 940px 主栏里会被横向裁掉，用户看不到最后一列。
+   合并到 7 列 + 允许换行，让它完整落在一屏里。 */
+table.cmp th, table.cmp td { padding: 8px 10px; white-space: normal; font-size: 12px; }
+table.cmp td:first-child { min-width: 132px; }
+
+/* 结果工具条 */
+.result-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.result-tools .spacer { flex: 1; }
+.result-tools .tool-note { font-size: 11.5px; color: var(--muted); }
+.result-tools .tool-note.ok { color: var(--ok); }
+
+/* 对比表里标出当前这台车 */
+tr.is-current td { background: var(--accent-soft); }
+tr.is-current td:first-child::after {
+  content: '本车'; margin-left: 6px; font-size: 10.5px; font-weight: 600;
+  color: var(--accent); background: #fff; border: 1px solid #c9dbff;
+  padding: 1px 6px; border-radius: 999px;
+}
+tr.is-miss td { color: var(--muted); }
+
+/* 打印页眉：只在纸上出现 */
+.print-head { display: none; }
+
+/* ---------------------------------------------------------- 加载骨架 */
 .loading { padding: 34px 0; text-align: center; color: var(--muted); font-size: 13px; }
 .spinner {
   width: 26px; height: 26px; margin: 0 auto 12px;
@@ -485,7 +512,55 @@ td.hl { font-weight: 650; color: var(--accent); }
 }
 
 @media print {
-  .nav, .col-side, .foot, .form-actions, .badges { display: none; }
-  .card { box-shadow: none; break-inside: avoid; }
-  body { background: #fff; }
+  /* 打印时只留「结果」，当成一份可交付的续航单页报告 */
+  @page { margin: 14mm 12mm; }
+
+  html, body { background: #fff; }
+  body { font-size: 12px; }
+
+  .nav, .col-side, .foot, .badges, #panel-form, #how, .result-tools,
+  .chat-card, .hero { display: none !important; }
+
+  /* 隐藏侧栏后要退出两栏网格，否则结果区只占一半宽度 */
+  main { max-width: none; padding: 0; }
+  .layout { display: block; margin-top: 0; }
+  .col-main { gap: 0; }
+
+  .card {
+    box-shadow: none; border: 0; border-radius: 0;
+    padding: 0; background: #fff;
+  }
+
+  /* 让底色和橙色爬坡线真的打出来 */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .print-head {
+    display: block; margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--text);
+  }
+  .print-head h1 { font-size: 17px; margin-bottom: 4px; }
+  .print-head p { margin: 0; font-size: 11px; color: var(--text-2); line-height: 1.7; }
+
+  /* 别让卡片/条目被切成两半；标题必须跟着它的内容走 */
+  .verdict, .kpi, .block > h3, .wx, .tl-item, .warn-item, .profile-wrap {
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .block > h3 { break-after: avoid; page-break-after: avoid; margin-bottom: 8px; }
+  .block { margin-top: 14px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi { padding: 9px 11px; }
+  .kpi-value { font-size: 18px; }
+
+  /* 表格：纸上不能横向滚动，只能让它自己缩小换行；表头跨页重复 */
+  .table-wrap { overflow: visible !important; break-inside: auto; }
+  table { font-size: 9.5px; }
+  th, td { padding: 4px 5px; white-space: normal; }
+  thead { display: table-header-group; }
+  .bd-row { grid-template-columns: 104px 1fr 72px; }
+
+  .profile-svg { height: auto; }
+  /* 不要把 padding-left 改小：时间线圆点是按 -22px 定位的，改了会被裁掉 */
+  .timeline { padding-left: 22px; }
+
+  a[href^="http"]::after { content: ''; }  /* 别把 URL 印出来 */
 }

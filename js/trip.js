@@ -5,6 +5,7 @@
 
 import { geocode, routeWithElevation, weatherAlongRoute, findChargersAlongRoute } from './geo.js';
 import { analyzeTrip, totalChargingMin, CAL } from './model.js';
+import { searchCars, toSpec } from './evdb.js';
 
 /**
  * @param {object} req
@@ -98,6 +99,62 @@ export async function runTripAnalysis(req, settings = {}, onProgress = () => {})
     analysis,
     chargingMin: totalChargingMin(analysis.charging),
   };
+}
+
+/**
+ * 在同一条路线上对比多款车。
+ *
+ * 关键设计：**复用已经拉取到的路线 / 天气 / 充电桩数据**，只重跑本地物理模型。
+ * 对比 5 台车不需要任何一次新的网络请求，也就没有"对比时又拉一遍路线、结果还和主结果
+ * 对不上"的问题。Agent 的 compare_cars 工具和界面上的对比表都走这一个函数。
+ *
+ * @param {object} base   runTripAnalysis 的返回值（至少要有 route / weather / chargers）
+ * @param {Array<string|object>} cars  车型关键词数组，或 {spec} / {battery, range, mass, dc}
+ */
+export function compareOnRoute(base, cars, opts = {}) {
+  const {
+    passengers = 2, luggageKg = 20, socStart = 90, hvacMode = 'auto',
+  } = opts;
+
+  const rows = [];
+  for (const q of (cars || []).slice(0, 5)) {
+    let spec = null;
+    if (typeof q === 'string') {
+      const hit = searchCars(q, 1)[0];
+      spec = hit ? toSpec(hit) : null;
+    } else if (q && q.battery && q.range) {
+      spec = toSpec({
+        id: 'custom', brand: '', model: q.name || '自定义车型',
+        battery: Number(q.battery), range: Number(q.range),
+        mass: Number(q.mass) || 1800, dc: Number(q.dc) || 100,
+      });
+      spec.name = q.name || '自定义车型';
+    } else if (q && q.spec) {
+      spec = q.spec;
+    }
+    if (!spec) { rows.push({ query: String(q), error: '车型未识别' }); continue; }
+
+    const a = analyzeTrip({
+      spec,
+      distanceKm: base.route.distanceKm,
+      durationH: base.route.durationH,
+      ascentM: base.route.ascentM,
+      descentM: base.route.descentM,
+      minEle: base.route.minEle,
+      maxEle: base.route.maxEle,
+      passengers,
+      luggageKg,
+      tempC: base.weather.avgTempC,
+      precipMm: base.weather.maxPrecip,
+      windKmh: base.weather.avgWindKmh,
+      hvacMode,
+      socStart,
+      chargers: base.chargers.list,
+      profile: base.route.profile,
+    });
+    rows.push({ spec, analysis: a, chargeMin: totalChargingMin(a.charging) });
+  }
+  return rows;
 }
 
 /**

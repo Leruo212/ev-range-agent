@@ -8,9 +8,9 @@
  */
 
 import { EV_DB, searchCars, getCarById, toSpec, customSpec } from './evdb.js';
-import { geocode, routeWithElevation, weatherAlongRoute, findChargersAlongRoute, sampleAlong } from './geo.js';
-import { analyzeTrip, segmentEnergy, totalChargingMin, CAL, hvacPowerKw } from './model.js';
-import { runTripAnalysis } from './trip.js';
+import { geocode, routeWithElevation, weatherAlongRoute, findChargersAlongRoute } from './geo.js';
+import { segmentEnergy, totalChargingMin, CAL, hvacPowerKw } from './model.js';
+import { runTripAnalysis, compareOnRoute } from './trip.js';
 
 // ---------------------------------------------------------------- LLM 客户端
 
@@ -93,6 +93,28 @@ async function getRoute(o, d, waypoints, settings) {
   routeCache.set(k, out);
   if (routeCache.size > 20) routeCache.delete(routeCache.keys().next().value);
   return out;
+}
+
+/** 天气也缓存：compare_cars 与 analyze_trip 打同一条路线时不必重复拉一遍 */
+const weatherCache = new Map();
+async function getWeather(route, departISO, settings) {
+  const key = `${route.distanceKm.toFixed(1)}|${(departISO || '').slice(0, 13)}`;
+  if (weatherCache.has(key)) return weatherCache.get(key);
+  const w = await weatherAlongRoute(route, departISO || new Date().toISOString(), 5);
+  weatherCache.set(key, w);
+  if (weatherCache.size > 12) weatherCache.delete(weatherCache.keys().next().value);
+  return w;
+}
+
+/** 充电桩同理 */
+const chargerCache = new Map();
+async function getChargers(route, settings) {
+  const key = route.distanceKm.toFixed(1) + '|' + (route.coords[0]?.lon.toFixed(2) || '') + (route.coords[route.coords.length - 1]?.lon.toFixed(2) || '');
+  if (chargerCache.has(key)) return chargerCache.get(key);
+  const c = await findChargersAlongRoute(route, { amapKey: settings.amapKey || '', corridorKm: 12 });
+  chargerCache.set(key, c);
+  if (chargerCache.size > 12) chargerCache.delete(chargerCache.keys().next().value);
+  return c;
 }
 
 /** 从剖面里挑出最陡的几段爬坡/下坡，让模型能说「在哪一段上坡」 */
@@ -312,7 +334,7 @@ export const TOOL_IMPL = {
 
   async get_weather_along_route({ origin, destination, depart_time }, ctx) {
     const { route, origin: o, destination: d } = await getRoute(origin, destination, [], ctx.settings);
-    const w = await weatherAlongRoute(route, depart_time || new Date().toISOString(), 5);
+    const w = await getWeather(route, depart_time, ctx.settings);
     return {
       from: o.name, to: d.name,
       summary: w.summary,
@@ -327,7 +349,7 @@ export const TOOL_IMPL = {
 
   async find_charging_stations({ origin, destination }, ctx) {
     const { route, origin: o, destination: d } = await getRoute(origin, destination, [], ctx.settings);
-    const c = await findChargersAlongRoute(route, { amapKey: ctx.settings.amapKey || '', corridorKm: 12 });
+    const c = await getChargers(route, ctx.settings);
     return {
       from: o.name, to: d.name,
       source: c.source,
@@ -407,52 +429,46 @@ export const TOOL_IMPL = {
 
   /** 同一条路线横向对比多款车，只拉一次路线数据 */
   async compare_cars(args, ctx) {
-    const { origin, destination, passengers = 2, luggage_kg = 20, depart_time, soc_start_pct = 90 } = args;
+    const { origin, destination, passengers = 2, luggage_kg = 20, depart_time, soc_start_pct = 90, hvac_mode = 'auto' } = args;
     if (!origin || !destination) return { error: '缺少 origin 或 destination' };
     const queries = args.cars || [];
-    if (!queries.length) return { error: '请提供 cars 数组，例如 ["小米 SU7 Pro", "特斯拉 Model 3"]' };
+    if (!queries.length) return { error: '请提供 cars 数组，例如 ["小米 SU7 Pro", "特斯拉 Model 3 后轮驱动版"]' };
 
     const { origin: o, destination: d, route } = await getRoute(origin, destination, args.waypoints || [], ctx.settings);
-    const weather = await weatherAlongRoute(route, depart_time || new Date().toISOString(), 5);
-    const chargers = await findChargersAlongRoute(route, { amapKey: ctx.settings.amapKey || '', corridorKm: 12 });
+    const weather = await getWeather(route, depart_time, ctx.settings);
+    const chargers = await getChargers(route, ctx.settings);
 
-    const rows = [];
-    for (const q of queries.slice(0, 5)) {
-      const spec = typeof q === 'string'
-        ? (searchCars(q, 1)[0] ? toSpec(searchCars(q, 1)[0]) : null)
-        : normSpec(q || {});
-      if (!spec) { rows.push({ query: q, error: '车型未识别' }); continue; }
-      const a = analyzeTrip({
-        spec,
-        distanceKm: route.distanceKm, durationH: route.durationH,
-        ascentM: route.ascentM, descentM: route.descentM,
-        minEle: route.minEle, maxEle: route.maxEle,
-        passengers, luggageKg: luggage_kg,
-        tempC: weather.avgTempC, precipMm: weather.maxPrecip, windKmh: weather.avgWindKmh,
-        hvacMode: 'auto', socStart: soc_start_pct,
-        chargers: chargers.list, profile: route.profile,
-      });
-      rows.push({
-        name: spec.name,
-        battery_kwh: spec.battery,
-        cltc_range_km: spec.range,
-        total_kwh: Number(a.totalKwh.toFixed(2)),
-        per_100km_kwh: Number(a.per100Kwh.toFixed(2)),
-        arrival_soc_pct: Number(a.arrivalSoc.toFixed(1)),
-        effective_range_km: Math.round(a.effectiveRangeKm),
-        vs_cltc_pct: Math.round(a.discount * 100),
-        charging_stops: a.charging.stops.length,
-        total_charge_min: totalChargingMin(a.charging),
-        feasible_direct: a.direct,
-      });
-    }
+    // 与界面上的对比表复用同一个实现，避免"对话里算一套、界面里算另一套"
+    const rows = compareOnRoute(
+      { route, weather, chargers },
+      queries,
+      { passengers, luggageKg: luggage_kg, socStart: soc_start_pct, hvacMode: hvac_mode }
+    );
+
     return {
       from: o.name, to: d.name,
       distance_km: Number(route.distanceKm.toFixed(1)),
       ascent_m: route.ascentM, descent_m: route.descentM,
       avg_temp_c: weather.avgTempC,
       passengers,
-      comparison: rows,
+      comparison: rows.map((r) => {
+        if (r.error) return { query: r.query, error: r.error };
+        const a = r.analysis;
+        return {
+          name: r.spec.name,
+          battery_kwh: r.spec.battery,
+          cltc_range_km: r.spec.range,
+          total_kwh: Number(a.totalKwh.toFixed(2)),
+          per_100km_kwh: Number(a.per100Kwh.toFixed(2)),
+          arrival_soc_pct: Number(a.arrivalSoc.toFixed(1)),
+          effective_range_km: Math.round(a.effectiveRangeKm),
+          vs_cltc_pct: Math.round(a.discount * 100),
+          charging_stops: a.charging.stops.length,
+          total_charge_min: r.chargeMin,
+          feasible_direct: a.direct,
+        };
+      }),
+      note: '所有车型用的都是同一条路线、同一份天气与同一个物理模型，差异只来自车本身。',
     };
   },
 };

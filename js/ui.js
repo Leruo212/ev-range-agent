@@ -320,6 +320,76 @@ function timelineBlock(a, departISO) {
   return `<div class="timeline">${items.join('')}</div>`;
 }
 
+function compareBlock(rows, currentName) {
+  if (!rows || !rows.length) return '';
+  const body = rows.map((r) => {
+    if (r.error) {
+      return `<tr class="is-miss"><td>${esc(r.query)}</td><td colspan="6">${esc(r.error)}</td></tr>`;
+    }
+    const a = r.analysis;
+    const cur = r.spec.name === currentName;
+    const okTxt = a.direct ? '可直达' : `${a.charging.stops.length} 次`;
+    return `<tr class="${cur ? 'is-current' : ''}">
+      <td>${esc(r.spec.name)}</td>
+      <td class="num">${r.spec.battery} / ${r.spec.range}</td>
+      <td class="num">${a.per100Kwh.toFixed(1)}</td>
+      <td class="num hl">${n0(a.effectiveRangeKm)}</td>
+      <td class="num">${n1(a.arrivalSoc)}%</td>
+      <td class="num">${okTxt}</td>
+      <td class="num">${r.chargeMin ? r.chargeMin + ' 分钟' : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="table-wrap"><table class="cmp">
+    <thead><tr>
+      <th>车型</th>
+      <th style="text-align:right">电池 kWh／官方 km</th>
+      <th style="text-align:right">实际 kWh/100km</th>
+      <th style="text-align:right">满电可跑</th>
+      <th style="text-align:right">到达电量</th>
+      <th style="text-align:right">中途补能</th>
+      <th style="text-align:right">补能时长</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>
+  <p class="card-hint" style="margin:8px 0 0">
+    所有车型共用同一条路线、同一份天气与同一个物理模型，差异只来自车本身（电池、整备质量、风阻标定）。
+    对比过程不额外联网——路线数据复用主分析的结果。
+  </p>`;
+}
+
+function printHead(res, a, departISO) {
+  const t = new Date(departISO);
+  const p2 = (v) => String(v).padStart(2, '0');
+  const when = `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())} ${p2(t.getHours())}:${p2(t.getMinutes())}`;
+  const now = new Date();
+  const gen = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}`;
+  return `<div class="print-head">
+    <h1>${esc(res.origin.name)} → ${esc(res.destination.name)}　续航与补能方案</h1>
+    <p>车型 ${esc(a.spec.name)}（电池 ${a.spec.battery} kWh／官方 ${a.spec.range} km）　
+      载员 ${a.input.passengers} 人 + 行李 ${a.input.luggageKg} kg　
+      出发 ${when} 电量 ${a.input.socStart}%　
+      路线来源 ${esc(res.route.source)}<br>
+      由 EV Range（leruo212.github.io/ev-range-agent）生成于 ${gen}。
+      能耗为物理模型推算值，误差通常 ±15%，非车企标称数据，仅供行程参考。</p>
+  </div>`;
+}
+
+function toolBar() {
+  return `<div class="result-tools">
+    <button id="btn-share" class="btn btn-ghost" type="button">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 3v13M8 7l4-4 4 4"/></svg>
+      复制分享链接
+    </button>
+    <button id="btn-print" class="btn btn-ghost" type="button">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 9V3h12v6M6 18H4v-6h16v6h-2M8 14h8v7H8z"/></svg>
+      打印 / 存 PDF
+    </button>
+    <span class="spacer"></span>
+    <span class="tool-note" id="share-note">链接包含全部参数，别人打开就能看到同一份结果</span>
+  </div>`;
+}
+
 function warnBlock(warnings) {
   if (!warnings.length) return '';
   const icon = { danger: '!', warn: '!', info: 'i' };
@@ -369,6 +439,8 @@ export function renderResults(res, container, ctx = {}) {
 
   const html = `
   <section class="card">
+    ${printHead(res, a, departISO)}
+
     <div class="verdict ${verdictCls}">
       <div class="verdict-icon">${verdictIcon}</div>
       <div>
@@ -376,6 +448,8 @@ export function renderResults(res, container, ctx = {}) {
         <p>${verdictDesc}</p>
       </div>
     </div>
+
+    ${toolBar()}
 
     <div class="kpis">
       <div class="kpi">
@@ -435,6 +509,11 @@ export function renderResults(res, container, ctx = {}) {
       <h3>续航区间推算 <span class="tail">同一辆车，条件不同能差一倍</span></h3>
       ${scenarioTable(a)}
     </div>
+
+    ${ctx.comparison && ctx.comparison.length ? `<div class="block">
+      <h3>换台车能跑下来吗 <span class="tail">同一条路线直接对比</span></h3>
+      ${compareBlock(ctx.comparison, a.spec.name)}
+    </div>` : ''}
 
     ${a.warnings.length ? `<div class="block">
       <h3>风险与提示 <span class="tail">共 ${a.warnings.length} 条</span></h3>

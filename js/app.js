@@ -4,7 +4,7 @@
 
 import { EV_DB, searchCars, toSpec, customSpec, getCarById } from './evdb.js';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, PRESETS, maskKey } from './config.js';
-import { runTripAnalysis, summarize } from './trip.js';
+import { runTripAnalysis, summarize, compareOnRoute } from './trip.js';
 import { runAgent, listModels } from './agent.js';
 import { suggestPlaces } from './geo.js';
 import { renderResults, renderLoading, renderError, mdToHtml, esc } from './ui.js';
@@ -27,8 +27,88 @@ function boot() {
   bindForm();
   bindChat();
   bindSettings();
+
+  const sp = new URLSearchParams(location.search);
+
+  // 分享链接优先：带完整参数的链接打开就直接还原并跑一遍
+  if (sp.has('demo')) {
+    fillDemo();
+    setTimeout(() => runFromForm(), 60);
+    return;
+  }
+  if (sp.get('o') && sp.get('d') && (sp.get('car') || sp.get('cb'))) {
+    applyParams(sp);
+    setTimeout(() => runFromForm(), 60);
+    return;
+  }
+
   $('car-input').value = '小米 SU7 Pro';
   resolveCar('小米 SU7 Pro');
+}
+
+/** 把 URL 参数还原到表单上 */
+function applyParams(sp) {
+  const set = (id, v) => { if (v != null && v !== '') $(id).value = v; };
+  set('origin', sp.get('o'));
+  set('destination', sp.get('d'));
+  set('waypoints', sp.get('w'));
+  set('compare', sp.get('cmp'));
+  set('passengers', sp.get('pax'));
+  set('luggage', sp.get('lug'));
+  set('hvac', sp.get('hvac'));
+  if (sp.get('soc')) {
+    $('soc').value = sp.get('soc');
+    $('soc-val').textContent = sp.get('soc') + '%';
+  }
+  if (sp.get('t')) $('depart').value = sp.get('t');
+
+  const carId = sp.get('car');
+  if (carId && carId !== 'custom' && getCarById(carId)) {
+    $('car-input').value = `${getCarById(carId).brand} ${getCarById(carId).model}`;
+    resolveCar($('car-input').value);
+    return;
+  }
+  if (sp.get('cb')) {
+    set('c-name', sp.get('cn'));
+    set('c-battery', sp.get('cb'));
+    set('c-range', sp.get('cr'));
+    set('c-mass', sp.get('cm'));
+    set('c-dc', sp.get('cd'));
+    const cs = readCustomCar();
+    if (cs) {
+      currentSpec = cs;
+      $('car-input').value = cs.name;
+      renderCarPicked();
+    }
+  }
+}
+
+/** 把当前表单状态编码成可分享的链接 */
+function buildShareURL() {
+  const p = collectParams();
+  const sp = new URLSearchParams();
+  sp.set('o', p.origin);
+  sp.set('d', p.destination);
+  if (p.waypoints.length) sp.set('w', p.waypoints.join(','));
+  if (p.compare.length) sp.set('cmp', p.compare.join(','));
+
+  const carId = $('car-id').value;
+  if (carId && getCarById(carId)) {
+    sp.set('car', carId);
+  } else {
+    sp.set('car', 'custom');
+    sp.set('cn', p.spec.name);
+    sp.set('cb', p.spec.battery);
+    sp.set('cr', p.spec.range);
+    sp.set('cm', p.spec.mass);
+    sp.set('cd', p.spec.dc);
+  }
+  sp.set('pax', p.passengers);
+  sp.set('lug', p.luggageKg);
+  sp.set('soc', p.socStart);
+  sp.set('hvac', p.hvacMode);
+  if ($('depart').value) sp.set('t', $('depart').value);
+  return `${location.origin}${location.pathname}?${sp.toString()}`;
 }
 
 function buildCarList() {
@@ -162,12 +242,6 @@ function bindForm() {
   $('btn-run').addEventListener('click', () => { runFromForm(); });
 
   $('btn-demo').addEventListener('click', () => { fillDemo(); runFromForm(); });
-
-  // 分享一个带参数的演示链接：index.html?demo=1 会自动填好参数并跑一遍
-  if (new URLSearchParams(location.search).has('demo')) {
-    fillDemo();
-    setTimeout(() => runFromForm(), 60);
-  }
 }
 
 function fillDemo() {
@@ -176,6 +250,7 @@ function fillDemo() {
   $('origin').value = '重庆市渝北区';
   $('destination').value = '重庆市武隆区仙女山';
   $('waypoints').value = '';
+  $('compare').value = '特斯拉 Model Y 长续航全轮驱动版, 理想 i8 Max';
   $('passengers').value = 3;
   $('luggage').value = 30;
   $('soc').value = 90;
@@ -197,6 +272,7 @@ function collectParams() {
   return {
     origin, destination,
     waypoints: $('waypoints').value.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean),
+    compare: $('compare').value.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean).slice(0, 3),
     spec: currentSpec,
     passengers: Math.max(1, parseInt($('passengers').value, 10) || 1),
     luggageKg: Math.max(0, parseFloat($('luggage').value) || 0),
@@ -237,7 +313,38 @@ async function runFromForm() {
     });
 
     lastResult = res;
-    renderResults(res, container, { departISO: params.departISO });
+
+    // 对比车型复用同一份路线/天气数据，不额外打接口。
+    // 本车永远排在第一行 —— 「我这台车 vs 别的车」才是用户真正要看的对比。
+    let comparison = [];
+    if (params.compare.length) {
+      try {
+        const others = params.compare.filter((q) => {
+          const hit = searchCars(q, 1)[0];
+          return !hit || `${hit.brand} ${hit.model}` !== params.spec.name;
+        });
+        comparison = compareOnRoute(
+          res,
+          [{ spec: params.spec }, ...others],
+          {
+            passengers: params.passengers,
+            luggageKg: params.luggageKg,
+            socStart: params.socStart,
+            hvacMode: params.hvacMode,
+          }
+        );
+      } catch (e) {
+        console.warn('[compare] 失败：', e);
+      }
+    }
+
+    renderResults(res, container, { departISO: params.departISO, comparison });
+    bindResultTools();
+
+    // 把参数写回地址栏，刷新和分享都还在这份结果上
+    try {
+      history.replaceState(null, '', buildShareURL());
+    } catch (e) { /* 自定义车型信息不全时忽略 */ }
 
     // 把结论注入对话上下文，后续追问不必重新算一遍
     const sm = summarize(res);
@@ -268,6 +375,47 @@ function setStatus(text, cls) {
   const el = $('run-status');
   el.textContent = text;
   el.className = 'run-status' + (cls ? ' ' + cls : '');
+}
+
+/** 结果区是整块重渲染的，按钮每次都要重新绑 */
+function bindResultTools() {
+  const note = $('share-note');
+
+  const shareBtn = $('btn-share');
+  if (shareBtn) {
+    shareBtn.addEventListener('click', async () => {
+      let url = location.href;
+      if (location.search.length < 2) {
+        try { url = buildShareURL(); } catch (e) { /* 用当前地址兜底 */ }
+      }
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      } catch (e) {
+        // http 局域网等非安全上下文没有 clipboard API，退回 execCommand
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = url;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch (e2) { ok = false; }
+      }
+      if (note) {
+        note.textContent = ok
+          ? '✓ 已复制，发给别人打开就是同一份结果'
+          : '浏览器不允许自动复制 —— 链接就在上方地址栏，手动复制即可';
+        note.className = 'tool-note' + (ok ? ' ok' : '');
+      }
+    });
+  }
+
+  const printBtn = $('btn-print');
+  if (printBtn) printBtn.addEventListener('click', () => window.print());
 }
 
 // ================================================================ 对话
