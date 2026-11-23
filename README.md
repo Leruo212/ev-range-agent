@@ -1,5 +1,7 @@
 # EV Range · 电车真实续航参谋
 
+<p align="right"><a href="README.en.md"><img src="https://img.shields.io/badge/English-SWITCH-1F4E79?style=flat-square" alt="Read in English"></a></p>
+
 > 输入 **车型 + 人数 + 出发地 + 目的地**，自动拉取真实路网、地形海拔和沿途天气，
 > 算清楚这一趟**每一度电花在哪儿**——尤其是爬坡多耗的、下坡收回的。
 
