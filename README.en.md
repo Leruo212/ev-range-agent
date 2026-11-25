@@ -1,84 +1,134 @@
-<h1 align="center">EV Range · Where Every Kilowatt-Hour Goes</h1>
+# EV Range · Trip Energy Estimates
 
-<p align="center">
-  <a href="README.md"><img src="https://img.shields.io/badge/%E4%B8%AD%E6%96%87-SWITCH-4E9A06?style=flat-square" alt="Switch to Chinese"></a>
-  &nbsp;
-  <img src="https://img.shields.io/badge/English-CURRENT-1F4E79?style=flat-square" alt="English">
-</p>
+Estimate trip energy from a car, passenger count and route, using elevation, weather and payload. Uphill consumption and downhill recovery are shown separately.
 
-<p align="center">
-  Give it a car, a passenger count, an origin and a destination. It returns a per-segment energy breakdown, not a single optimistic number.
-</p>
+[中文](README.md)
 
-## The problem
+A static browser application with no backend or build step. Default map, terrain and weather sources require no data API key. Optional chat needs your own OpenAI-compatible model endpoint and credentials, stored in your browser.
 
-Manufacturer range figures are measured on a flat test cycle. Real trips have hills. A route that climbs two passes and descends twice has a net elevation change of zero and a very real energy cost, because ascent is paid in full and descent is only partly recovered. Averaging the two away is why the dashboard number and the trip computer disagree.
+Compare cars on the same route, share trip inputs by link, or print a report. This tool uses formulas and empirical parameters; it does not have vehicle-wide real-world calibration results. Data failures are flagged, and actual charge and charging conditions still need checking before travel.
 
-This tool refuses to average. It computes ascent and descent separately and reports both.
+**[Open the app](https://leruo212.github.io/ev-range-agent/)** · **[Prefilled example](https://leruo212.github.io/ev-range-agent/?demo=1)**
 
-## What it actually computes
+![Trip input form](docs/screenshot-home.png)
 
-| Component | Method |
+## Energy Model
+
+The calculation and parameters are in `js/model.js`.
+
+| Component | Calculation |
 |---|---|
-| **Base driving energy** | Official CLTC consumption per 100 km, times distance, times a **1.20 real-road factor**, then modified by three corrections: speed (U-shaped curve), temperature (battery efficiency), payload |
-| **Climb work** | `E = m·g·Δh`, with Δh taken as **cumulative ascent**, not net elevation change |
-| **Descent recovery** | Cumulative descent work times **62% recovery efficiency**, capped at 50% of consumption, so the car can never gain charge by driving downhill |
-| **HVAC and low-voltage loads** | Heating `0.85 + 0.085 × (20 − T)` kW, cooling `0.55 + 0.055 × (T − 26)` kW, multiplied by actual driving hours |
+| Driving | Rated consumption × distance × default 1.20 road factor, with speed, temperature, payload, precipitation and approximate wind corrections |
+| Climbing | `m × g × cumulative ascent`, including passengers and luggage |
+| Descent recovery | `m × g × cumulative descent × 0.62`, capped at 50% of driving energy |
+| HVAC and accessories | Heating or cooling power × trip duration, preconditioning when enabled, plus low-voltage loads |
 
-Three calibration curves were fitted against real trips rather than assumed.
+Speed and temperature use piecewise empirical curves. At 80 km/h the speed factor is 1.0; at 120 km/h it is 1.33. These are model assumptions, not guarantees for an individual car.
 
-### Battery swap models
+### Charging, Rest and Battery Swaps
 
-Models that support swap are handled separately, because charge time is not a function of the car but of the station generation:
+The planner uses 20%–80% charging segments, a 15% suggested minimum arrival charge, and 72% of peak DC power as an average charging assumption, plus six minutes per stop. Rest suggestions use two hours or 200 km and are merged with charging stops.
 
-| Platform | Architecture | Peak DC | Models |
-|---|---|---|---|
-| NT3.0 | 900V (up to 925V / 765A), 5C | **600 kW** | NIO ES8 gen 3, ET9, ES9; Onvo L60 / L90 |
-| NT2.5 | 400V | ~180 kW | NIO ET5, ES6 (2025, NX9031 cabin) |
-| NT2.0 | 400V | ~125 kW | NIO ET7 |
+The catalogue marks swap-capable NIO and Onvo models. For those entries, output includes both charging time and an indicative three-minute swap. Station stock and queues are not guaranteed. Platform labels, peak charging figures and battery capacities are reference values from the built-in catalogue; check the exact model year and configuration yourself.
 
-## Elevation profile
+![Charging and swap estimates](docs/screenshot-nio-swap.png)
+![Trip result overview](docs/screenshot-result.png)
 
-The output includes an elevation chart per route. The orange line is where the energy goes; flat-looking segments are cheap, and a single sustained climb can cost more than a hundred kilometres of motorway.
+## Elevation Profile
 
-## Taking the result with you
+The route is sampled at 60 points against terrain elevation data. A five-point moving average reduces noise before cumulative ascent and descent are calculated. Segments with gradients above 2.5% are highlighted.
 
-- **Shareable link** encoding the full input set, so a result can be reproduced by whoever receives it.
-- **Multi-car comparison** on the same route, two to five models side by side.
-- **Print layout** for handing to someone who will not open a browser.
+The recorded noise simulation reduced false ascent on a flat route from 236 m to 47 m, at the cost of smoothing short climbs. In the documented Chongqing–Wulong example, the route was 199.7 km with 1,730 m ascent and 376 m descent; these are example outputs, not fixed results for future queries.
 
-## Conversational follow-ups
+![Elevation profile and route weather](docs/screenshot-elevation.png)
+![Charging and rest timeline](docs/screenshot-timeline.png)
 
-An optional chat layer exposes the model as tools:
+## Sharing, Comparisons and Printing
+
+- **Share inputs:** the URL encodes origin, destination, waypoints, car, passengers, luggage, charge, HVAC, departure time and comparison cars. Credentials are excluded. Opening the link queries route and weather data again, so results may change.
+- **Compare cars:** reuse the fetched route, terrain and weather and rerun the local energy model. The selected car stays first in the table. The form accepts up to three additional models; the comparison function handles up to five entries.
+- **Print:** the print view hides controls and chat, retaining results, input parameters and source notes. Use the browser's print dialog to save a PDF.
+
+![Car comparison and printable results](docs/screenshot-compare.png)
+
+## Optional Chat
+
+Configure an OpenAI-compatible endpoint that supports function calling. The agent exposes these tools and displays their calls:
 
 | Tool | Purpose |
 |---|---|
-| `analyze_trip` | Main entry: route, elevation, weather, chargers, energy breakdown, charging plan |
-| `compare_cars` | Two to five models on one route |
-| `estimate_energy` | Pure model query, for counterfactuals such as "what if it were -5°C" |
-| `plan_route`, `get_weather_along_route`, `find_charging_stations` | Individual lookups |
-| `search_car_model` | Search across a built-in catalogue of 51 Chinese EV models, annotated with platform and swap support |
+| `analyze_trip` | Route, elevation, weather, chargers, energy and charging plan |
+| `compare_cars` | Compare models on one route |
+| `estimate_energy` | Recalculate under different weather or payload assumptions |
+| `plan_route` | Route lookup |
+| `get_weather_along_route` | Weather lookup |
+| `find_charging_stations` | Charger lookup |
+| `search_car_model` | Search the built-in car catalogue |
 
-## Why it is a static site
+Prompts require numbers to come from tools. If a model does not support tool calls, the interface reports the fallback to chat-only mode.
 
-No bundler, no framework, no dependencies, no API keys. The entire application is served as static files, which means it can be hosted for free, opened from a USB stick, and audited by anyone who reads the source. Every data source used is keyless and publicly reachable.
+![Chat and tool-call trace](docs/screenshot-chat.png)
 
-## Running it
+## Data Sources and Car Catalogue
+
+| Purpose | Default source | With an Amap key |
+|---|---|---|
+| Geocoding | Photon / OpenStreetMap | Amap Geocoding |
+| Route | OSRM public instance | Amap driving routes |
+| Elevation | Open-Meteo / Copernicus terrain | Same |
+| Weather | Open-Meteo hourly forecasts | Same |
+| Chargers | Overpass / OpenStreetMap | Amap POI search |
+
+The catalogue contains 51 reference entries across brands including Tesla, BYD, NIO, Onvo, XPeng, Li Auto, Xiaomi and others. Search by model, brand or catalogue labels such as platform and swap support. For an unlisted car, enter battery capacity and rated range manually; additional parameters can be overridden in the interface.
+
+Chinese place-name handling in `js/geo.js` splits queries at administrative suffixes, searches for a city anchor, retries shorter queries with location bias and penalises distant matches. The documented 20-query check matched the correct city for all 20 and the intended POI for 19. That sample does not establish general accuracy; inspect resolved coordinates for ambiguous or small places.
+
+## Run Locally
 
 ```bash
-python3 -m http.server 8000
-# open http://localhost:8000
+git clone https://github.com/Leruo212/ev-range-agent.git
+cd ev-range-agent
+python3 -m http.server 8788
+# Open http://localhost:8788/
 ```
 
-Opening `index.html` directly from the file system will fail on module loading; serve it over HTTP.
+Serve over HTTP: opening `index.html` as `file://` can fail because of module loading restrictions. No npm installation or bundling is needed. For GitHub Pages, select the `main` branch root; `.nojekyll` is included.
+
+## Model Settings and Privacy
+
+In API settings, enter the base URL, key and model ID. The base URL can end in `/v1` or the full `/chat/completions` path. Presets cover several compatible providers and local Ollama. The endpoint must allow requests from the browser.
+
+Model settings are stored in this browser's localStorage. Requests go directly to the configured provider; this project has no backend proxy. Other devices and browsers need their own settings. Shared trip links exclude credentials. Optional Amap credentials improve domestic route and POI lookups.
 
 ## Limitations
 
-- The 1.20 real-road factor and the 62% recovery figure are calibrated on a limited set of trips. They are documented constants, not universal truths; cold weather and heavy traffic will both be underestimated.
-- Wind is not modelled.
-- The catalogue covers 51 models. An unlisted car cannot be analysed.
-- Elevation data is sampled along the route, so very short climbs are smoothed.
+- There is not enough real-car comparison data to claim a general error bound. Assumptions may be inaccurate for a particular vehicle or extreme conditions.
+- Terrain elevation is not road-surface elevation; tunnels, bridges and short steep slopes can be poorly represented.
+- Weather, geocoding, routing and charger data depend on external services. Fallbacks are reported, but a fallback estimate can be less accurate.
+- Charger coverage is uneven. Confirm stops in a dedicated charging app before departure.
+- The model does not capture individual driving style, battery ageing, detailed traffic or service-area queues.
+- Car parameters vary by model year. The 51 catalogue entries are reference values and can be overridden.
 
-## Licence
+## Structure and Recorded Checks
 
-MIT. See [LICENSE](LICENSE).
+```text
+index.html       Page structure
+css/style.css    Responsive and print styles
+js/app.js        Form, analysis, chat and settings
+js/ui.js         Results, charts and timeline
+js/agent.js      Model client, tools and agent loop
+js/trip.js       Data acquisition and analysis orchestration
+js/model.js      Energy model and charging/rest planner
+js/geo.js        Data sources and place-name handling
+js/evdb.js       Car catalogue
+js/config.js     Local settings
+docs/            Screenshots
+```
+
+The project documents numerical checks of climbing energy, elevation-noise simulations, the 20-place geocoding sample, car comparisons, input-link round trips, printed output and a mock model/tool-call flow. Data-service availability is network-dependent; Overpass uses mirror retries and a timeout. These are recorded development checks, not a guarantee of future service availability.
+
+## Use and Licence
+
+Estimates are for trip planning. Actual consumption depends on driving, roads, load, tyre pressure and battery condition, among other factors.
+
+[MIT](LICENSE) © 2026 M1r4th0R
